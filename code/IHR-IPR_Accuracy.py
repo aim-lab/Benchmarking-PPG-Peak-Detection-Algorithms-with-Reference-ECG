@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from scipy import signal, interpolate
 
 def calculate_itervals_forwards(points):
@@ -54,15 +55,23 @@ def find_closest_bigger_value(value, list_of_values):
             return i
     return -1
 
-def calculate_windowed_IHR_IPR_agreement(ppg_peaks, ecg_peaks, len_ppg, fs=256, window=30, max_HR_detla=5):
-    # 0) Make a copy that we will use later.
-    start_arg = 0
-    end_arg = len(ppg_peaks)
+def calculate_windowed_IHR_IPR_agreement(ppg_peaks, ecg_peaks, fs=256, window=30, ptt=0.45, max_HR_detla=5):
+    """
+    :param ppg_peaks: A numpy array of PPG fiduciaries positions when sampled at 'fs'
+    :param ecg_peaks: A numpy array of ECG R-Peaks when sampled at 'fs'
+    :param fs: Sample rate [Hz] of PPG and ECG peaks
+    :return: A Pandas Dataframe with peak matching F1 score for each window.
+    :param window: Window size [Seconds]
+    :param ptt: Approximate Pulse Transition Time [Seconds]
+    :param max_HR_detla: Size of the IHR window [BPM]
+    :return:
+    """
 
-    # 1) Shift the ECG peaks by 460ms
-    ecg_peaks = ecg_peaks + int(0.45 * fs)
+    # 1) Shift the ECG peaks by approximate ppt
+    ecg_peaks = ecg_peaks + int(ptt * fs)
 
-    # 2) Limit the signal ranges to one another. We have already limited the ECG peaks to high quality only
+    # 2) Limit the signal ranges to one another.
+    start_arg, end_arg = 0, ppg_peaks[-1]
     if ppg_peaks[-1] > ecg_peaks[-1]:
         end_arg = find_closest_smaller_value(ecg_peaks[-1], ppg_peaks) + 1
     if ppg_peaks[0] < ecg_peaks[0]:
@@ -70,7 +79,7 @@ def calculate_windowed_IHR_IPR_agreement(ppg_peaks, ecg_peaks, len_ppg, fs=256, 
 
     ppg_peaks = ppg_peaks[start_arg:end_arg]
 
-    # 3) Calculate the RR interval and filter out bad points. Convert to HR estimate
+    # 3) Calculate the RR interval and filter out really bad points. Convert to HR estimate
     RR = calculate_itervals_forwards(ecg_peaks) / fs
     RR_filt = moving_average_filter(RR, win_samples=10,
                                     percent=50)  # Moving average window of 10 beats. #Filter @ 50% from moving average
@@ -80,7 +89,7 @@ def calculate_windowed_IHR_IPR_agreement(ppg_peaks, ecg_peaks, len_ppg, fs=256, 
     PP = calculate_itervals_forwards(ppg_peaks) / fs
     HR_PP = 60 / PP
 
-    # 4) Build the HR band and continous IHR and IPR functions
+    # 4) Build the HR band and continuous IHR and IPR functions
     HR_RR_continous = interpolate.interp1d(ecg_peaks, HR_RR)
     HR_PP_continous = interpolate.interp1d(ppg_peaks, HR_PP)
 
@@ -90,15 +99,16 @@ def calculate_windowed_IHR_IPR_agreement(ppg_peaks, ecg_peaks, len_ppg, fs=256, 
     HR_PP = HR_PP_continous(resample_2Hz)
 
     # 6) Calculate the agreement inside windows
-    window_fs = 60
-    len_ppg_in_s = len_ppg/fs
-    len_ppg_at_2hz = len_ppg_in_s*2
-    windows = np.arange(0, len_ppg_at_2hz, window_fs)
+    fs_2hz = 2
+    window_2hz = window*fs_2hz
+    len_ppg_in_s = ppg_peaks[-1]/fs
+    len_ppg_at_2hz = len_ppg_in_s*fs_2hz
+    windows = np.arange(0, len_ppg_at_2hz, window_2hz)
     window_stats = pd.DataFrame()
 
     for i in (range(windows.shape[0] - 1)):
-        window_HR_RR = HR_RR[i*window_fs:(i+1)*window_fs]
-        window_HR_PP = HR_PP[i*window_fs:(i+1)*window_fs]
+        window_HR_RR = HR_RR[i*window_2hz:(i+1)*window_2hz]
+        window_HR_PP = HR_PP[i*window_2hz:(i+1)*window_2hz]
         agreement_1 = np.sum(((window_HR_PP < window_HR_RR+1) & (window_HR_PP >= window_HR_RR-1)) | np.isnan(window_HR_RR)) / len(window_HR_RR)
         agreement_2 = np.sum(((window_HR_PP < window_HR_RR+2) & (window_HR_PP >= window_HR_RR-2)) | np.isnan(window_HR_RR)) / len(window_HR_RR)
         agreement_3 = np.sum(((window_HR_PP < window_HR_RR+3) & (window_HR_PP >= window_HR_RR-3)) | np.isnan(window_HR_RR)) / len(window_HR_RR)
