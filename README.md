@@ -1,7 +1,7 @@
 # Benchmarking PPG Peak Detection Algorithms using ECG as a Reference
 
-- See /paper for the associated publication
-- See /code for code Beat Matching and IHR_IPR Accuracy Algorithms
+- See /paper for the publication
+- See /code for the Beat Matching and IHR_IPR Accuracy Algorithms
 - Requirements: Python3, Numpy, Pandas, Scipy
 
 ## Abstract
